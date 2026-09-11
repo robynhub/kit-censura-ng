@@ -30,7 +30,17 @@ class Audit:
         self.stream.write(json.dumps(record, sort_keys=True, ensure_ascii=True) + '\n')
         self.stream.flush()
         os.fsync(self.stream.fileno())
-        print('%s %s %s' % (record['time'], level, event), file=sys.stderr)
+        # In normal mode keep console output terse. In debug mode expose the
+        # structured fields that are already considered safe enough for the
+        # audit log. This makes category/error/executable information visible
+        # without requiring operators to tail and decode the JSONL file.
+        suffix = ''
+        if self.debug:
+            fields = {k: v for k, v in record.items()
+                      if k not in ('time', 'run_id', 'host', 'event', 'level')}
+            if fields:
+                suffix = ' ' + json.dumps(fields, sort_keys=True, ensure_ascii=True)
+        print('%s %s %s%s' % (record['time'], level, event, suffix), file=sys.stderr)
 
     def close(self):
         self.stream.close()

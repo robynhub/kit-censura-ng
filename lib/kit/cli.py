@@ -41,7 +41,8 @@ def main():
     os.umask(0o077)
     parser = argparse.ArgumentParser(description='kit-censura-ng 2.0.0')
     parser.add_argument('--config', '-c', default=os.environ.get('KIT_CONFIG', 'config/kit.ini'))
-    parser.add_argument('--debug', action='store_true', help='Structured debug; never bash -x')
+    parser.add_argument('--debug', action='store_true',
+                        help='Show structured event fields and helper stderr; helper stderr is not written to the audit log')
     parser.add_argument('--dry-run', action='store_true', help='Plan apply only, without remote/routing changes')
     parser.add_argument('--category', action='append', help='Refresh only this category, retain other cached lists')
     parser.add_argument('command', choices=('doctor', 'update', 'build', 'apply', 'run', 'summary', 'verify'))
@@ -57,7 +58,8 @@ def main():
         with Lock(config.state):
             run_id = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ-') + uuid.uuid4().hex[:12]
             audit = Audit(config.log, run_id, args.debug or config.boolean('kit', 'debug'))
-            audit.emit('run_started', command=args.command, dry_run=args.dry_run)
+            audit.emit('run_started', command=args.command, dry_run=args.dry_run,
+                       selected_categories=args.category or [])
             degraded, failed = False, False
             if args.command in ('update', 'build', 'run'):
                 _, manifest = build(config, audit, args.category, args.command != 'build')
