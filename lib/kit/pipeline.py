@@ -42,17 +42,23 @@ class Lock:
 def execute(command, config, audit, event, output=None, timeout=None, env=None):
     if not command:
         raise ValueError('Empty command: ' + event)
-    audit.emit(event + '_started', level='DEBUG', executable=Path(command[0]).name)
-    # stderr can contain provider credentials. Do not capture it in the audit log.
+    effective_timeout = timeout or config.integer('kit', 'helper_timeout', 300, 1)
+    audit.emit(event + '_started', level='DEBUG', executable=Path(command[0]).name,
+               timeout=effective_timeout)
+    # stderr can contain provider credentials, so it must never be copied into
+    # the audit log. With explicit debug enabled, inherit stderr instead: helper
+    # diagnostics go directly to the operator's terminal and remain outside the
+    # persistent structured log.
     with open(os.devnull, 'wb') as null:
         result = subprocess.Popen(command, cwd=str(config.base), stdout=output or null,
-                                  stderr=null, env=env, start_new_session=True)
+                                  stderr=None if audit.debug else null,
+                                  env=env, start_new_session=True)
         try:
-            result.wait(timeout=timeout or config.integer('kit', 'helper_timeout', 300, 1))
+            result.wait(timeout=effective_timeout)
         except subprocess.TimeoutExpired:
             os.killpg(result.pid, signal.SIGKILL)
             result.wait()
-            raise RuntimeError(event + ' timed out') from None
+            raise RuntimeError('%s timed out after %ds' % (event, effective_timeout)) from None
     if result.returncode:
         raise RuntimeError('%s exited with status %d' % (event, result.returncode))
     audit.emit(event + '_completed', level='DEBUG')
@@ -83,6 +89,7 @@ def build(config, audit, selected=None, refresh=True):
         data = None
         status = 'cached'
         update = refresh and config.boolean(section, 'update', True) and (not selected or name in selected)
+        refresh_error = None
         if update:
             try:
                 source = sourcedir / (name + '.txt')
@@ -120,7 +127,9 @@ def build(config, audit, selected=None, refresh=True):
                 audit.emit('source_validated', category=name, source_sha256=data['source_sha256'], **stats)
             except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
                 degraded = True
-                audit.emit('source_failed', level='ERROR', category=name, error=str(error))
+                refresh_error = error
+                audit.emit('source_failed', level='ERROR', category=name,
+                           error_type=type(error).__name__, error=str(error))
                 if config.get('kit', 'on_failure', 'keep') == 'abort':
                     failures.append(name)
                 status = 'stale'
@@ -128,7 +137,15 @@ def build(config, audit, selected=None, refresh=True):
             data = cached
             if data is None:
                 failures.append(name)
-                audit.emit('source_unavailable', level='ERROR', category=name)
+                if refresh_error is not None:
+                    reason = 'refresh_failed_no_cache'
+                elif selected and name not in selected:
+                    reason = 'not_selected_no_cache'
+                elif not refresh:
+                    reason = 'build_requested_no_cache'
+                else:
+                    reason = 'no_cache'
+                audit.emit('source_unavailable', level='ERROR', category=name, reason=reason)
                 continue
             max_age = config.integer(section, 'max_age_seconds', 0)
             if max_age and time.time() - data['fetched_at'] > max_age:
