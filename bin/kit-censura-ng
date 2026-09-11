@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Resolve the installation independently of the caller's working directory.
+set -euo pipefail
+ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+PYTHON=${KIT_PYTHON:-python3}
+if [[ -z ${KIT_PYTHON:-} && -x "$ROOT/.venv/bin/python3" ]]; then
+    PYTHON="$ROOT/.venv/bin/python3"
+fi
+export PYTHONPATH="$ROOT/lib${PYTHONPATH:+:$PYTHONPATH}"
+exec "$PYTHON" -m kit "$@"

@@ -1,0 +1,2 @@
+# A domain excludes itself and all its subdomains.
+# allowed.example

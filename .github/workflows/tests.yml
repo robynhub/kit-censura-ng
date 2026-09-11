@@ -1,0 +1,25 @@
+name: Tests
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  python-minimum:
+    runs-on: ubuntu-latest
+    container: python:3.8.10-slim
+    steps:
+      - uses: actions/checkout@v4
+      - run: python --version && python -m unittest discover -s tests -v
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native validators
+        run: sudo apt-get update && sudo apt-get install -y bind9-utils unbound shellcheck
+      - name: Core, integration and native DNS tests
+        run: python3 -m unittest discover -s tests -v
+      - name: Bash syntax and shellcheck
+        run: |
+          find bin helpers -type f \( -name '*.sh' -o -name kit-censura-ng \) -print0 | xargs -0 -n1 bash -n
+          shellcheck bootstrap.sh bin/kit-censura-ng helpers/download/*.sh helpers/deploy/*.sh
+      - name: Bootstrap without optional dependencies
+        run: ./bootstrap.sh --init && bin/kit-censura-ng --dry-run run

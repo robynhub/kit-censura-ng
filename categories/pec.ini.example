@@ -1,0 +1,34 @@
+# Merge the relevant options into the category in config/kit.ini, replacing download.
+[category:agcom]
+enabled = true
+download = ["{python}", "{root}/helpers/download/pec.py", "{config}", "{category}"]
+imap_host = mail.pecprovider.it
+imap_port = 993
+imap_user = user@pec.example.net
+imap_password_env = KIT_AGCOM_PASSWORD
+imap_senders = agcom@cert.agcom.it
+imap_folder = INBOX
+imap_max_messages = 1000
+attachment_regex = Allegato B Elenco URL \d+_\d{4}_\d{2}_\d{2}.*\.txt
+remove_subdomains = true
+url_policy = ignore
+bind_a = 0.0.0.0
+bind_wildcard = 0.0.0.0
+
+[category:cncpo]
+enabled = true
+download = ["{python}", "{root}/helpers/download/pec.py", "{config}", "{category}"]
+parser = ["{python}", "{root}/helpers/parse/cncpo.py", "{input}"]
+requires = gpg
+imap_host = mail.pecprovider.it
+imap_user = user@pec.example.net
+imap_password_env = KIT_CNCPO_PASSWORD
+imap_senders = dipps012.B3L4@pecps.interno.it
+attachment_regex = blacklist\.csv\.gpg
+gpg_decrypt = true
+gpg_home = /etc/kit-censura-ng/gnupg
+remove_subdomains = true
+routes = true
+bind_a = 212.25.179.125
+bind_wildcard = 212.25.179.125
+unbound_redirect = 212.25.179.125

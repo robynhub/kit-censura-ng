@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.py[cod]
+state/
+config/kit.ini
+config/manuale.txt
+config/whitelist-domains.txt
+config/whitelist-ips.txt
+config/blacklist.csv
+*.gpg
+*.key
+.env

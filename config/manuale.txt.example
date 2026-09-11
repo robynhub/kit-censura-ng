@@ -1,0 +1,4 @@
+# Entries supplied by the operator, one domain/IP/CIDR per line.
+# blocked.example
+# 192.0.2.1
+# 2001:db8::/128

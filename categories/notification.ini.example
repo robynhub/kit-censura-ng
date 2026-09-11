@@ -1,0 +1,16 @@
+# Merge into [hooks]. This hook sends mail only after configured apply succeeds.
+[hooks]
+after_apply = ["{python}", "{root}/helpers/deploy/notify.py", "{config}", "{generation}"]
+smtp_host = smtp.example.net
+smtp_port = 465
+smtp_tls = ssl
+smtp_user = noc@example.net
+smtp_password_env = KIT_SMTP_PASSWORD
+smtp_from = noc@example.net
+smtp_to = operations@example.net
+smtp_subject = Applicazione kit-censura-ng completata
+smtp_body = Applicazione delle destinazioni configurate completata.
+    Generazione: {run_id}
+    Domini unici: {domains}
+    Prefissi IP: {ip_prefixes}
+    Data UTC: {time}

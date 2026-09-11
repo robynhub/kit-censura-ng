@@ -1,0 +1,23 @@
+kit-censura-ng 2.0.0
+Copyright 2026 kit-censura-ng contributors.
+Licensed under GNU GPL version 2 or, at your option, any later version.
+
+Based on rfc1036/kit-censura:
+https://github.com/rfc1036/kit-censura
+Audited upstream revision: dfc87432fff166dfd4a077b08848634989918e8b
+
+Original project copyright 2008-2024 Seeweb s.r.l.
+Originally written by Marco d'Itri <md@Linux.IT>.
+Further components and improvements by Antonio Bartolini
+<antonio.bartolini@connesi.it>; original IVASS helper by Antonio Prado.
+The upstream README and its license statement are preserved in docs/UPSTREAM-README.
+
+helpers/download/download_aams.py, download_tabacchi.py, download_agcom.py
+and download_consob.py derive from the upstream helpers. CONSOB is modified to
+reject partial fetches. The new core, configuration, deployment and parsers
+replace the former shell/Perl pipeline; redirect settings derive from upstream.
+The IVASS adapter is rewritten using the standard library and optional pypdf.
+
+helpers/download/tlds.txt is a snapshot of IANA's public root-zone TLD list:
+https://data.iana.org/TLD/tlds-alpha-by-domain.txt
+Snapshot version is recorded in its first line. It is data, not a blocklist.

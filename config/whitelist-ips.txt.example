@@ -1,0 +1,2 @@
+# IPs or CIDRs, IPv4 and IPv6. A subnet inside a blocked range is subtracted.
+# 192.0.2.0/24

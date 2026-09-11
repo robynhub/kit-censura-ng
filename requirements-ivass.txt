@@ -1,0 +1,2 @@
+# Optional, only for IVASS PDF extraction; supports Python 3.8.
+pypdf==5.9.0

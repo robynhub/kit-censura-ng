@@ -1,0 +1,135 @@
+# Copy to kit.ini. Paths are relative to this file; {root} is the installation.
+# JSON argv arrays are executed without a shell. Do not put passwords in argv.
+[kit]
+state_dir = ../state
+log_file = ../state/audit.jsonl
+whitelist_domains = whitelist-domains.txt
+whitelist_ips = whitelist-ips.txt
+on_failure = keep
+helper_timeout = 300
+max_source_bytes = 104857600
+debug = false
+
+[dns]
+# Must equal upload:bind.remote_root + /current/zones when upload is enabled.
+bind_zone_directory = /etc/bind/censura/current/zones
+ttl = 300
+serial = 1
+soa_ns = ns.localhost.
+soa_mailbox = root.localhost.
+zone_ns = ns.localhost.
+refresh = 2419200
+retry = 2419200
+expire = 2419200
+# Optional local validator argv; remote validation is mandatory during upload.
+# unbound_check = ["unbound-checkconf", "{generation}/unbound.conf"]
+
+[routes]
+enabled = false
+aggregate = true
+# Aggregation merges only complete adjacent ranges: never adds an unlisted IP.
+min_prefix_v4 = 25
+min_prefix_v6 = 0
+table = 254
+protocol = 186
+nexthop_v4 = 192.168.254.254
+nexthop_v6 =
+timeout = 300
+
+[upload:bind]
+enabled = false
+servers = root@ns1.example.net root@ns2.example.net
+remote_root = /etc/bind/censura
+main_config = /etc/bind/named.conf
+ssh_port = 22
+connect_timeout = 10
+timeout = 300
+
+[upload:unbound]
+enabled = false
+servers = root@resolver.example.net
+remote_root = /etc/unbound/censura
+main_config = /etc/unbound/unbound.conf
+ssh_port = 22
+connect_timeout = 10
+timeout = 300
+
+[hooks]
+# Called only after all enabled deployments succeed. No default outgoing email.
+# after_apply = ["/usr/local/sbin/notify-noc", "{generation}/manifest.json"]
+
+# Order is precedence for duplicate domains. Categories are never hard-coded.
+[category:manuale]
+enabled = true
+update = true
+download = ["{root}/helpers/download/local.sh", "{base}/manuale.txt"]
+min_entries = 0
+url_policy = host
+invalid_policy = fail
+remove_subdomains = false
+routes = false
+bind_a = 0.0.0.0
+bind_wildcard = 0.0.0.0
+unbound_mode = legacy
+unbound_redirect = 0.0.0.0
+
+[category:aams]
+enabled = false
+download = ["{python}", "{root}/helpers/download/download_aams.py", "--start", "https://www.adm.gov.it/portale/siti-web-inibiti-giochi", "--require-txt"]
+min_entries = 1
+max_drop_percent = 100
+bind_a = 217.175.53.72
+bind_wildcard = sito-inibito-giochi.adm.gov.it.
+unbound_redirect = sito-inibito-giochi.adm.gov.it.
+
+[category:tabacchi]
+enabled = false
+download = ["{python}", "{root}/helpers/download/download_tabacchi.py", "--start", "https://www.adm.gov.it/portale/siti-inibiti-tabacchi", "--require-txt"]
+bind_a = 217.175.53.228
+bind_wildcard = sito-inibito-tabacchi.adm.gov.it.
+unbound_redirect = sito-inibito-tabacchi.adm.gov.it.
+
+[category:agcom]
+enabled = false
+# For PEC replace download with the command in categories/pec.ini.example.
+download = ["{python}", "{root}/helpers/download/download_agcom.py", "--start", "https://www.agcom.it/provvedimenti-a-tutela-del-diritto-d-autore", "--require-txt"]
+remove_subdomains = true
+url_policy = ignore
+bind_a = 0.0.0.0
+bind_wildcard = 0.0.0.0
+unbound_redirect =
+
+[category:consob]
+enabled = false
+download = ["{python}", "{root}/helpers/download/download_consob.py", "--start", "https://www.consob.it/web/area-pubblica/oscuramenti"]
+timeout = 3600
+bind_a = 0.0.0.0
+bind_wildcard = 0.0.0.0
+unbound_redirect =
+
+[category:cncpo]
+enabled = false
+download = ["{root}/helpers/download/local.sh", "{base}/blacklist.csv"]
+parser = ["{python}", "{root}/helpers/parse/cncpo.py", "{input}"]
+remove_subdomains = true
+routes = true
+bind_a = 212.25.179.125
+bind_wildcard = 212.25.179.125
+unbound_redirect = 212.25.179.125
+
+[category:pscaiip]
+enabled = false
+download = ["{root}/helpers/download/pscaiip.sh", "/opt/piracy-shield-agent-main/src/storage/app/fqdn/last.txt", "/opt/piracy-shield-agent-main/src/storage/app/ipv4/last.txt", "/opt/piracy-shield-agent-main/src/storage/app/ipv6/last.txt"]
+bind_a = 0.0.0.0
+bind_wildcard = 0.0.0.0
+unbound_redirect =
+routes = false
+
+[category:ivass]
+enabled = false
+download = ["{python}", "{root}/helpers/download/download_ivass.py", "--start", "https://www.ivass.it/cyber/siti-abusivi/index.html", "--exclude-file", "{root}/categories/ivass-exclude.txt"]
+python_modules = pypdf
+timeout = 3600
+bind_a = 85.159.194.59
+bind_wildcard = warning.ivass.it.
+unbound_redirect = warning.ivass.it.
