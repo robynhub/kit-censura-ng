@@ -128,6 +128,28 @@ def is_txt_url(u: str) -> bool:
                 return True
     return False
 
+def is_txt_response(url, ctype, headers, data):
+    """Validate a downloaded TXT even when ADM exposes it through an opaque URL."""
+    if is_txt_url(url):
+        return True
+    filename = content_disposition_filename(headers)
+    if filename and filename.lower().endswith('.txt'):
+        return True
+    ctype = (ctype or '').lower()
+    if ctype == 'text/plain':
+        return True
+
+    # Some document portals serve downloads as application/octet-stream.
+    # Reject signatures that clearly identify a different document type or
+    # an HTML error/landing page, then allow an opaque binary response to be
+    # validated by the normal list parser downstream.
+    prefix = data[:512].lstrip().lower()
+    if prefix.startswith(b'%pdf-') or prefix.startswith(b'pk\x03\x04') or prefix.startswith(b'\xd0\xcf\x11\xe0'):
+        return False
+    if prefix.startswith(b'<!doctype html') or prefix.startswith(b'<html'):
+        return False
+    return ctype in ('application/octet-stream', 'application/download', 'binary/octet-stream', '')
+
 # ---------------------------
 # Individua direttamente elenco_siti_inibiti_giochi.txt
 # ---------------------------
@@ -325,7 +347,7 @@ def main():
                     help="Percorso di output (file o cartella). Se omesso, stampa su stdout.")
     ap.add_argument("--timeout", type=int, default=25, help="Timeout HTTP in secondi (default: %(default)s)")
     ap.add_argument("--require-txt", dest="require_txt", action="store_true",
-                    help="Fallisce se l'URL non è un .txt")
+                    help="Fallisce se la risposta scaricata non sembra un file TXT")
     ap.add_argument("-v", "--verbose", action="store_true", help="Log dettagliati su stderr")
     args = ap.parse_args()
 
@@ -339,19 +361,25 @@ def main():
         print("ERRORE: impossibile trovare 'elenco_siti_inibiti_giochi.txt' sulla pagina.", file=sys.stderr)
         sys.exit(1)
 
-    if args.require_txt and not is_txt_url(txt_url):
-        print("ERRORE: trovato un link ma non sembra .txt (usa --require-txt).", file=sys.stderr)
-        sys.exit(2)
-
     if args.verbose:
-        print(f"[OK] URL TXT: {txt_url}", file=sys.stderr)
+        print(f"[OK] URL TXT candidato: {txt_url}", file=sys.stderr)
 
-    # 2) Scarica
+    # 2) Scarica. ADM may expose the TXT through a document endpoint whose URL
+    # does not end in .txt, so --require-txt must validate the response rather
+    # than rejecting the URL before it is fetched.
     try:
         data, ctype, headers = download(txt_url, timeout=args.timeout, verbose=args.verbose)
     except Exception as e:
         print(f"ERRORE durante il download: {e}", file=sys.stderr)
         sys.exit(3)
+
+    if args.require_txt and not is_txt_response(txt_url, ctype, headers, data):
+        filename = content_disposition_filename(headers)
+        detail = f"Content-Type={ctype or 'unknown'}"
+        if filename:
+            detail += f", filename={filename!r}"
+        print(f"ERRORE: la risposta del link selezionato non sembra TXT ({detail}).", file=sys.stderr)
+        sys.exit(2)
 
     # 3) Normalizza e pulisci
     text = bytes_to_text_normalized(data, headers)
@@ -385,4 +413,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
