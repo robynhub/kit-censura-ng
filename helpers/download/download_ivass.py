@@ -76,7 +76,6 @@ def main():
         links.feed(fetch(url, args.timeout).decode('utf-8'))
         urls = [urljoin(url, x) for x in links.urls]
         pdfs.update(x for x in urls if 'ivcs' in x.lower() and '.pdf' in x.lower())
-        # Preserve the provider's explicit page navigation.
         next_page = len(seen) + 1
         next_urls = [x for x in urls if re.search(r'[?&]page=%d(?:&|$)' % next_page, x)]
         if not next_urls:
@@ -97,5 +96,5 @@ if __name__ == '__main__':
     try:
         main()
     except Exception as error:
-        print('IVASS download failed: ' + type(error).__name__, file=sys.stderr)
+        print('IVASS download failed: %s: %s' % (type(error).__name__, error), file=sys.stderr)
         sys.exit(1)
