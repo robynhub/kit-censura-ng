@@ -38,11 +38,9 @@ def content_disposition_filename(headers):
     cd = headers.get("Content-Disposition") or headers.get("content-disposition")
     if not cd:
         return None
-    # filename*, RFC 5987
     m = re.search(r'filename\*\s*=\s*(?:UTF-8\'\')?([^;]+)', cd, flags=re.I)
     if m:
         return unquote_pct(m.group(1)).strip('"\' ')
-    # filename=
     m = re.search(r'filename\s*=\s*"([^"]+)"', cd, flags=re.I)
     if m:
         return m.group(1)
@@ -65,7 +63,7 @@ class AnchorCollector(HTMLParser):
     """Raccoglie (href, text) in ordine di apparizione."""
     def __init__(self):
         super().__init__()
-        self.links = []  # list[(href, text)]
+        self.links = []
         self._in_a = False
         self._href = None
         self._buf = []
@@ -127,28 +125,63 @@ def is_txt_url(u: str) -> bool:
                 return True
     return False
 
+def is_txt_response(url, ctype, headers, data):
+    """Validate TXT downloads exposed through opaque ADM document URLs."""
+    if is_txt_url(url):
+        return True
+    filename = content_disposition_filename(headers)
+    if filename and filename.lower().endswith('.txt'):
+        return True
+    ctype = (ctype or '').lower()
+    if ctype == 'text/plain':
+        return True
+    prefix = data[:512].lstrip().lower()
+    if prefix.startswith(b'%pdf-') or prefix.startswith(b'pk\x03\x04') or prefix.startswith(b'\xd0\xcf\x11\xe0'):
+        return False
+    if prefix.startswith(b'<!doctype html') or prefix.startswith(b'<html'):
+        return False
+    return ctype in ('application/octet-stream', 'application/download', 'binary/octet-stream', '')
+
 # ---------------------------
 # Individua direttamente elenco_siti_inibiti_tabacchi.txt
 # ---------------------------
 TARGET_SUBSTR = "elenco_siti_inibiti_tabacchi.txt"
 
 def find_txt_url_on_page(listing_url, timeout=25, verbose=False):
-    """
-    Strategia robusta:
-      1) cerca tra gli <a href=...> un URL che contenga 'elenco_siti_inibiti_tabacchi.txt'
-      2) se non trovato, scansiona l'HTML grezzo per path/URL che contengono quella stringa
-    Ritorna l'URL assoluto o None.
-    """
+    """Find the tabacchi TXT, accepting opaque ADM document links."""
     html_text, ctype, _ = http_get(listing_url, timeout=timeout, binary=False)
     if verbose:
         print(f"[INFO] Apertura pagina: {listing_url} (Content-Type: {ctype})", file=sys.stderr)
 
-    # (1) anchor href
-    for absu, txt in parse_anchors(listing_url, html_text):
-        if TARGET_SUBSTR in absu.lower():
+    anchors = parse_anchors(listing_url, html_text)
+
+    def score_link(absu, text):
+        u = absu.lower()
+        t = (text or '').strip().lower()
+        score = 0
+        if 'siti' in t and 'inibit' in t:
+            score += 70
+        if 'tabacchi' in t:
+            score += 50
+        if 'txt' in t:
+            score += 40
+        if TARGET_SUBSTR in u:
+            score += 100
+        if is_txt_url(u):
+            score += 30
+        if 'sha' in t or 'sha' in u or 'controllo' in t:
+            score -= 200
+        if is_same_domain(absu):
+            score += 10
+        return score
+
+    ranked = sorted(((score_link(absu, txt), absu, txt) for absu, txt in anchors), reverse=True)
+    for score, absu, txt in ranked:
+        if score >= 60:
+            if verbose:
+                print(f"[INFO] Candidato TXT da anchor: {absu} | testo={txt!r} | score={score}", file=sys.stderr)
             return absu
 
-    # (2) scan HTML grezzo – prova a ricostruire un URL plausibile
     patterns = [
         r'(?P<u>https?://[^\s"\'<>]*elenco_siti_inibiti_tabacchi\.txt(?:\?[^\s"\'<>]*)?)',
         r'(?P<u>/[^\s"\'<>]*elenco_siti_inibiti_tabacchi\.txt(?:\?[^\s"\'<>]*)?)',
@@ -157,55 +190,35 @@ def find_txt_url_on_page(listing_url, timeout=25, verbose=False):
     for pat in patterns:
         m = re.search(pat, html_text, flags=re.I)
         if m:
-            cand = m.group("u")
-            return urljoin(listing_url, cand)
+            return urljoin(listing_url, m.group("u"))
 
     return None
 
-# ---------------------------
-# Post-processing del TXT
-# ---------------------------
-# Righe "versione" tipo: "0000311_2024.06.06" o con "-" al posto di "_"
 VERSION_LINE_RE = re.compile(r"^\s*\d{5,}[_-]\d{4}\.\d{2}\.\d{2}\s*$")
 
 def bytes_to_text_normalized(data, headers):
-    """
-    Decodifica i bytes in testo, rimuove BOM, normalizza le EOL a Unix (LF).
-    """
     charset = None
     try:
         charset = headers.get_content_charset()
     except Exception:
         pass
-
     if charset:
         try:
             text = data.decode(charset, errors="replace")
         except Exception:
             text = data.decode("utf-8", errors="replace")
     else:
-        # utf-8-sig rimuove eventuale BOM
         try:
             text = data.decode("utf-8-sig")
         except Exception:
             text = data.decode("utf-8", errors="replace")
-
-    # Normalizza EOL: CRLF/CR -> LF (toglie i ^M)
     text = text.replace("\r\n", "\n").replace("\r", "\n")
-    # Rimuovi BOM residuo
     if text.startswith("\ufeff"):
         text = text.lstrip("\ufeff")
     return text
 
 def clean_sort_dedupe_domains(text):
-    """
-    - Rimuove QUALSIASI riga che corrisponde al pattern versione
-    - Normalizza: strip, minuscolo; toglie schema/percorsi; toglie '.' finale
-    - Deduplica e ordina
-    - Ritorna testo con LF finale
-    """
     lines = text.split("\n")
-
     cleaned = []
     seen = set()
     for ln in lines:
@@ -214,30 +227,20 @@ def clean_sort_dedupe_domains(text):
             continue
         if VERSION_LINE_RE.match(s):
             continue
-
         s = s.lower()
-        # togli "http(s)://"
         if s.startswith(("http://", "https://")):
             s = s.split("://", 1)[1]
-        # tronca a prima "/" (solo dominio)
         s = s.split("/", 1)[0]
-        # togli eventuale '.' finale
         if s.endswith("."):
             s = s[:-1]
-        # ignora commenti
         if s.startswith("#"):
             continue
-
         if s and s not in seen:
             seen.add(s)
             cleaned.append(s)
-
     cleaned.sort()
     return "\n".join(cleaned) + ("\n" if cleaned else "")
 
-# ---------------------------
-# Download helper
-# ---------------------------
 def guess_filename(file_url, headers=None, default="elenco_siti_inibiti_tabacchi.txt"):
     if headers:
         fn = content_disposition_filename(headers)
@@ -262,9 +265,6 @@ def download(file_url, timeout=25, verbose=False):
         print(f"[INFO] Download: {file_url} ({ctype}, {clen} bytes)", file=sys.stderr)
     return data, ctype, headers
 
-# ---------------------------
-# CLI
-# ---------------------------
 def main():
     ap = argparse.ArgumentParser(
         description="Scarica 'elenco_siti_inibiti_tabacchi.txt' (ADM), pulisce e stampa/salva l'elenco (LF, ordinato, no duplicati)."
@@ -274,35 +274,35 @@ def main():
                     help="Percorso di output (file o cartella). Se omesso, stampa su stdout.")
     ap.add_argument("--timeout", type=int, default=25, help="Timeout HTTP in secondi (default: %(default)s)")
     ap.add_argument("--require-txt", dest="require_txt", action="store_true",
-        help="Fallisce se l'URL non è un .txt")
+                    help="Fallisce se la risposta scaricata non sembra un file TXT")
     ap.add_argument("-v", "--verbose", action="store_true", help="Log dettagliati su stderr")
     args = ap.parse_args()
 
-    # 1) Individua direttamente l'URL al TXT
     txt_url = find_txt_url_on_page(args.start, timeout=args.timeout, verbose=args.verbose)
     if not txt_url:
         print("ERRORE: impossibile trovare 'elenco_siti_inibiti_tabacchi.txt' sulla pagina.", file=sys.stderr)
         sys.exit(1)
 
-    if args.require_txt and not is_txt_url(txt_url):
-        print("ERRORE: trovato un link ma non sembra .txt (usa --require-txt).", file=sys.stderr)
-        sys.exit(2)
-
     if args.verbose:
-        print(f"[OK] URL TXT: {txt_url}", file=sys.stderr)
+        print(f"[OK] URL TXT candidato: {txt_url}", file=sys.stderr)
 
-    # 2) Scarica
     try:
         data, ctype, headers = download(txt_url, timeout=args.timeout, verbose=args.verbose)
     except Exception as e:
         print(f"ERRORE durante il download: {e}", file=sys.stderr)
         sys.exit(3)
 
-    # 3) Normalizza e pulisci
+    if args.require_txt and not is_txt_response(txt_url, ctype, headers, data):
+        filename = content_disposition_filename(headers)
+        detail = f"Content-Type={ctype or 'unknown'}"
+        if filename:
+            detail += f", filename={filename!r}"
+        print(f"ERRORE: la risposta del link selezionato non sembra TXT ({detail}).", file=sys.stderr)
+        sys.exit(2)
+
     text = bytes_to_text_normalized(data, headers)
     result = clean_sort_dedupe_domains(text)
 
-    # 4) Output: stdout o file
     if args.output is None:
         sys.stdout.write(result)
     else:
@@ -319,7 +319,6 @@ def main():
                 dest = out_arg
                 if dest.suffix == "":
                     dest = dest.with_suffix(".txt")
-
         try:
             save_text_to_path(result, dest)
             if args.verbose:
@@ -330,4 +329,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
