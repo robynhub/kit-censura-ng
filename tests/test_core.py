@@ -188,6 +188,35 @@ class PipelineTest(unittest.TestCase):
         self.run_kit('--debug', 'run', expected=1)
         self.assertNotIn('SECRET_PASSWORD', (self.base / 'audit.jsonl').read_text())
 
+    def test_debug_shows_helper_stderr_and_structured_failure_context(self):
+        helper = self.base / 'failing-helper.sh'
+        helper.write_text('#!/bin/sh\necho "helper diagnostic: upstream returned 503" >&2\nexit 7\n')
+        helper.chmod(0o700)
+        self.config.write_text('[kit]\nstate_dir=state\nlog_file=audit.jsonl\n'
+            '[category:broken]\n'
+            'download=' + json.dumps([str(helper)]) + '\n')
+
+        proc = self.run_kit('--debug', '--category', 'broken', 'update', expected=1)
+        self.assertIn('helper diagnostic: upstream returned 503', proc.stderr)
+        self.assertIn('source_failed', proc.stderr)
+        self.assertIn('"category": "broken"', proc.stderr)
+        self.assertIn('"error": "download_broken exited with status 7"', proc.stderr)
+        self.assertIn('"reason": "refresh_failed_no_cache"', proc.stderr)
+
+        audit_text = (self.base / 'audit.jsonl').read_text()
+        self.assertNotIn('helper diagnostic: upstream returned 503', audit_text)
+
+    def test_non_debug_suppresses_helper_stderr(self):
+        helper = self.base / 'failing-helper.sh'
+        helper.write_text('#!/bin/sh\necho "helper diagnostic should be hidden" >&2\nexit 9\n')
+        helper.chmod(0o700)
+        self.config.write_text('[kit]\nstate_dir=state\nlog_file=audit.jsonl\n'
+            '[category:broken]\n'
+            'download=' + json.dumps([str(helper)]) + '\n')
+
+        proc = self.run_kit('--category', 'broken', 'update', expected=1)
+        self.assertNotIn('helper diagnostic should be hidden', proc.stderr)
+
     def test_stale_limit(self):
         self.run_kit('update')
         raw = self.current() / 'raw/arbitrary-new-name.json'
